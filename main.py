@@ -1,16 +1,25 @@
-# This is a sample Python script.
+import asyncio
+import logging
+from telethon.sync import TelegramClient, events
+from config.config import Config, load_config
 
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
+config: Config = load_config()
 
+logging.basicConfig(
+    level=logging.getLevelName(level=config.log.level),
+    format=config.log.format
+)
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press ⌘F8 to toggle the breakpoint.
+api_id = config.api.api_id
+api_hash = config.api.api_hash
+username = config.api.user
 
+with TelegramClient(username, api_id, api_hash) as client:
+   client.send_message('me', 'Hello, myself!')
+   print(client.download_profile_photo('me'))
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
+   @client.on(events.NewMessage(pattern='(?i).*Hello'))
+   async def handler(event):
+      await event.reply('Hey!')
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+   client.run_until_disconnected()
