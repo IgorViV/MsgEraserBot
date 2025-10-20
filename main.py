@@ -1,7 +1,8 @@
-import asyncio
 import logging
-from telethon.sync import TelegramClient, events
+from telethon import TelegramClient, events
 from config.config import Config, load_config
+from lexicon.lexicon import LEXICON_RU
+from keyboards.keyboard import selection_button_list, period_buttons
 
 config: Config = load_config()
 
@@ -13,13 +14,30 @@ logging.basicConfig(
 api_id = config.api.api_id
 api_hash = config.api.api_hash
 username = config.api.user
+bot_token = config.bot.token
 
-with TelegramClient(username, api_id, api_hash) as client:
-   client.send_message('me', 'Hello, myself!')
-   print(client.download_profile_photo('me'))
+bot_client = TelegramClient('bot', api_id, api_hash)
+user_client = TelegramClient(username, api_id, api_hash)
 
-   @client.on(events.NewMessage(pattern='(?i).*Hello'))
-   async def handler(event):
-      await event.reply('Hey!')
 
-   client.run_until_disconnected()
+@bot_client.on(events.NewMessage(pattern="/help"))
+async def help_handler(event):
+    await event.respond(LEXICON_RU["/help"], buttons=None)
+
+
+@bot_client.on(events.NewMessage(pattern="/start"))
+async def start_handler(event):
+    if not event.is_private:
+        return
+
+    user_id = event.sender_id
+
+    selection_buttons = bot_client.build_reply_markup(selection_button_list)
+    selection_buttons.resize = True
+
+    await event.respond(LEXICON_RU["/start"], buttons=selection_buttons)
+
+
+bot_client.start(bot_token=bot_token)
+user_client.start()
+bot_client.run_until_disconnected()
