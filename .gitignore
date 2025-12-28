@@ -31,8 +31,9 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+sessions/
 *.session
-temp.*
+temp/
 *.txt
 
 # PyInstaller
