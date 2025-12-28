@@ -130,6 +130,7 @@ async def delete_old_messages(user_client, chat_id, days, user_id):
         return 0, 0
 
 async def deletion_handler(event, count_days=90):
+    """Обработчик удаления сообщений"""
     user_id = event.sender_id
 
     if user_id not in user_sessions or not user_sessions[user_id].selected_chat_id:
@@ -179,11 +180,11 @@ async def start_handler(event):
     if not event.is_private:
         return
 
-    if await authorize_user(event.sender_id):
+    user_id = event.sender_id
+
+    if await authorize_user(user_id):
         await event.respond("Вы уже авторизованы.\nДля начала работы введите /start")
         return
-
-    user_id = event.sender_id
 
     if not user_sessions or user_id not in user_sessions:
         user_sessions[user_id] = UserSession()
@@ -198,6 +199,7 @@ async def start_handler(event):
 
     user_client = TelegramClient(session_name, api_id, api_hash)
     await user_client.connect()
+    file_qr_path = f"sessions/user_{user_id}/telegram_qr.png"
 
     try:
         qr_login = await user_client.qr_login()
@@ -209,7 +211,7 @@ async def start_handler(event):
 
         qr = qrcode.make(qr_login.url)
         print('QR:', qr)
-        file_qr_path = f"sessions/user_{user_id}/telegram_qr.png"
+
         qr.save(file_qr_path)
         await event.respond(
             "QR-код для авторизации:\nОтсканируйте его через приложение Telegram: Меню → Устройства → Подключить устройство")
@@ -217,7 +219,14 @@ async def start_handler(event):
 
         await qr_login.wait(timeout=60)
         print("Успешная авторизация!")
-        await event.respond("✅ Успешная авторизация!")
+        user_sessions[user_id].current_user_client = user_client
+        result_message = (
+            f"✅ Авторизация успешна!\n"
+            f"• Для продолжения введите команду /start\n"
+        )
+        await event.respond(result_message)
+        if os.path.exists(file_qr_path):
+            os.remove(file_qr_path)
         await user_client.disconnect()
 
     except SessionPasswordNeededError:
@@ -225,6 +234,8 @@ async def start_handler(event):
         # Сохраняем состояние
         user_sessions[user_id].current_user_client = user_client
         user_sessions[user_id].current_user_step = 'awaiting_password'
+        if os.path.exists(file_qr_path):
+            os.remove(file_qr_path)
         asyncio.get_event_loop().time() + 60
         await event.respond("Требуется пароль двухфакторной аутентификации.\nВведите пароль (у вас 60 секунд):")
         # Ждем ввод пароля с таймаутом
@@ -254,7 +265,11 @@ async def password_handler(event):
 
         me = await user_client.get_me()
         print(f"Авторизация с 2FA успешна! Вы вошли как: {me.first_name}")
-        await event.respond(f"✅ Авторизация успешна!\nВы вошли как: {me.first_name}")
+        result_message = (
+            f"✅ Авторизация успешна!\nВы вошли как: {me.first_name}\n"
+            f"• Для продолжения введите команду /start\n"
+        )
+        await event.respond(result_message)
         await user_client.disconnect()
     except Exception as e:
         await event.respond(f"❌ Ошибка авторизации: {str(e)}\nПопробуйте снова или начните заново командой /auth")
@@ -262,6 +277,29 @@ async def password_handler(event):
         user_sessions[user_id].current_user_step = None
         if user_client:
             await user_client.disconnect()
+
+@bot_client.on(events.NewMessage(pattern="/logout"))
+async def logout_handler(event):
+    """Выход из аккаунта"""
+    user_id = event.sender_id
+
+    await event.respond("Выход из аккаунта...", buttons=Button.clear())
+
+    if user_id in user_sessions and user_sessions[user_id].current_user_client:
+        try:
+            user_client = user_sessions[user_id].current_user_client
+            await user_client.connect()
+            await user_client.log_out()
+            await user_client.disconnect()
+
+            del user_sessions[user_id]
+
+            await event.respond("✅ Вы успешно вышли из аккаунта")
+
+        except Exception as e:
+            await event.respond(f"❌ Ошибка при выходе: {str(e)}")
+    else:
+        await event.respond("❌ Вы не авторизованы")
 
 
 @bot_client.on(events.NewMessage(pattern="/start"))
@@ -276,6 +314,11 @@ async def start_handler(event):
 
     if await authorize_user(user_id):
         print("Вы авторизованы.")
+        session_name = f"sessions/user_{user_id}/user_{user_id}"
+
+        user_client = TelegramClient(session_name, api_id, api_hash)
+        user_sessions[user_id].current_user_client = user_client
+
         selection_buttons = bot_client.build_reply_markup(selection_button_list)
         selection_buttons.resize = True
         await event.respond(LEXICON_RU["/start"], buttons=selection_buttons)
@@ -319,9 +362,9 @@ async def get_selected_chat(event):
         )
         return
 
-    current_user_session_name = f"sessions/user_{user_id}/user_{user_id}"
+    user_client = user_sessions[user_id].current_user_client
 
-    async with TelegramClient(current_user_session_name, api_id, api_hash) as user_client:
+    async with user_client:
         chat_type = None
         chat_title = None
         chat_first_name = None
@@ -448,9 +491,7 @@ async def confirm_deletion(event):
         chat_id = user_sessions[user_id].selected_chat_id
         chat_info = f"ID: {chat_id}"
 
-        session_name = f"sessions/user_{user_id}/user_{user_id}"
-
-        user_client = TelegramClient(session_name, api_id, api_hash)
+        user_client = user_sessions[user_id].current_user_client
 
         async with user_client:
 
